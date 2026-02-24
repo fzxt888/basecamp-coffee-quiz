@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Image from "next/image";
 
 // --- Data ---
@@ -94,6 +94,18 @@ export default function Home() {
   const [screen, setScreen] = useState<"welcome" | "quiz" | "result">("welcome");
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState<PersonalityKey[]>([]);
+  const [copied, setCopied] = useState(false);
+
+  // On mount: check URL for a direct result link
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const key = params.get("result") as PersonalityKey | null;
+    if (key && key in personalities) {
+      setScreen("result");
+      // Fill answers with that key so getResult() works
+      setAnswers(Array(questions.length).fill(key));
+    }
+  }, []);
 
   function handleAnswer(key: PersonalityKey) {
     const newAnswers = [...answers, key];
@@ -110,6 +122,7 @@ export default function Home() {
     setScreen("welcome");
     setCurrentQuestion(0);
     setAnswers([]);
+    window.history.replaceState({}, "", "/");
   }
 
   function getResult(): PersonalityKey {
@@ -118,6 +131,26 @@ export default function Home() {
     return (Object.entries(counts) as [PersonalityKey, number][]).reduce((a, b) =>
       b[1] > a[1] ? b : a
     )[0];
+  }
+
+  async function handleShare(resultKey: PersonalityKey) {
+    const url = `${window.location.origin}?result=${resultKey}`;
+    const shareData = {
+      title: `I'm a ${personalities[resultKey].name}!`,
+      text: `I took the Basecamp Coffee personality quiz — ${personalities[resultKey].tagline}`,
+      url,
+    };
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch {
+        // fall through to clipboard
+      }
+    }
+    await navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }
 
   // --- Screens ---
@@ -148,12 +181,11 @@ export default function Home() {
 
   if (screen === "quiz") {
     const q = questions[currentQuestion];
-    const progress = ((currentQuestion) / questions.length) * 100;
+    const progress = (currentQuestion / questions.length) * 100;
 
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-[#0a0a0a] px-6">
         <div className="w-full max-w-xl">
-          {/* Progress */}
           <div className="mb-2 flex items-center justify-between text-sm text-zinc-500">
             <span>Question {currentQuestion + 1} of {questions.length}</span>
           </div>
@@ -164,7 +196,6 @@ export default function Home() {
             />
           </div>
 
-          {/* Question */}
           <h2
             className="mb-8 text-5xl leading-tight text-white"
             style={{ fontFamily: "'Bebas Neue', sans-serif" }}
@@ -172,7 +203,6 @@ export default function Home() {
             {q.question}
           </h2>
 
-          {/* Options */}
           <div className="flex flex-col gap-3">
             {q.options.map((opt) => (
               <button
@@ -194,39 +224,65 @@ export default function Home() {
   const resultKey = getResult();
   const result = personalities[resultKey];
 
-  return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-[#0a0a0a] px-6 text-center">
-      <div className="w-full max-w-lg">
-        <p className="mb-2 text-sm font-medium uppercase tracking-widest text-[#c8a96e]">
-          Your Coffee Personality
-        </p>
-        <h2
-          className="mb-1 text-6xl leading-none text-white sm:text-7xl"
-          style={{ fontFamily: "'Bebas Neue', sans-serif" }}
-        >
-          {result.name}
-        </h2>
-        <p className="mb-6 text-xl font-semibold text-[#c8a96e]">{result.coffee}</p>
+  // Update URL so this result is directly linkable
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("result") !== resultKey) {
+      window.history.replaceState({}, "", `?result=${resultKey}`);
+    }
+  }
 
-        <div className="mb-6 overflow-hidden rounded-2xl">
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-[#0a0a0a] px-6 py-12">
+      {/* Results card */}
+      <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-900 shadow-2xl">
+        {/* Image */}
+        <div className="relative h-56 w-full">
           <Image
             src={result.image}
             alt={result.coffee}
-            width={600}
-            height={400}
-            className="h-64 w-full object-cover"
+            fill
+            className="object-cover"
             priority
           />
+          {/* Gradient overlay */}
+          <div className="absolute inset-0 bg-gradient-to-t from-zinc-900 via-zinc-900/40 to-transparent" />
+          {/* Basecamp label */}
+          <p className="absolute left-5 top-5 text-xs font-medium uppercase tracking-widest text-white/70">
+            Basecamp Coffee
+          </p>
         </div>
 
-        <p className="mb-8 text-base text-zinc-400">{result.tagline}</p>
+        {/* Card body */}
+        <div className="px-8 pb-8 pt-4 text-center">
+          <p className="mb-1 text-sm font-medium uppercase tracking-widest text-[#c8a96e]">
+            Your Coffee Personality
+          </p>
+          <h2
+            className="mb-1 text-6xl leading-none text-white"
+            style={{ fontFamily: "'Bebas Neue', sans-serif" }}
+          >
+            {result.name}
+          </h2>
+          <p className="mb-4 text-lg font-semibold text-[#c8a96e]">{result.coffee}</p>
+          <p className="mb-8 text-sm leading-relaxed text-zinc-400">{result.tagline}</p>
 
-        <button
-          onClick={reset}
-          className="rounded-full border border-zinc-600 px-8 py-3 text-sm font-medium text-zinc-300 transition-colors hover:border-zinc-400 hover:text-white"
-        >
-          Take it again
-        </button>
+          {/* Share button */}
+          <button
+            onClick={() => handleShare(resultKey)}
+            className="mb-3 w-full rounded-full bg-[#c8a96e] py-3 text-sm font-bold uppercase tracking-widest text-black transition-opacity hover:opacity-90"
+            style={{ fontFamily: "'Bebas Neue', sans-serif" }}
+          >
+            {copied ? "Link Copied!" : "Share My Result"}
+          </button>
+
+          <button
+            onClick={reset}
+            className="w-full rounded-full border border-zinc-700 py-3 text-sm font-medium text-zinc-400 transition-colors hover:border-zinc-500 hover:text-white"
+          >
+            Take it again
+          </button>
+        </div>
       </div>
     </div>
   );
